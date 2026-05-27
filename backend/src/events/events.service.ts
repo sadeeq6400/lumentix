@@ -25,6 +25,7 @@ import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
 import { SponsorContribution, ContributionStatus } from '../sponsors/entities/sponsor-contribution.entity';
 import { EscrowService } from '../payments/services/escrow.service';
 import { RefundService } from '../payments/refunds/refund.service';
+import { CurrenciesService } from '../currencies/currencies.service';
 
 export interface PaginatedResult<T> {
   data: T[];
@@ -60,9 +61,20 @@ export class EventsService {
     private readonly escrowService: EscrowService,
     @Inject(forwardRef(() => RefundService))
     private readonly refundService: RefundService,
+    private readonly currenciesService: CurrenciesService,
   ) { }
 
   async createEvent(dto: CreateEventDto, organizerId: string): Promise<Event> {
+    if (dto.currency) {
+      const codes = await this.currenciesService.findActiveCodes();
+      const supported = codes.map(c => c.toLowerCase());
+      if (!supported.includes(dto.currency.toLowerCase())) {
+        throw new BadRequestException(
+          `Currency "${dto.currency}" is not supported. Supported: ${codes.join(', ')}`,
+        );
+      }
+    }
+
     const event = this.eventRepository.create({
       ...dto,
       startDate: new Date(dto.startDate),

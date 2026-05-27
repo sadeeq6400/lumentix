@@ -1,6 +1,9 @@
 use crate::error::LumentixError;
-use crate::types::{Event, Ticket, TicketTransferRecord, INSTANCE_LIFETIME, PERSISTENT_LIFETIME};
-use soroban_sdk::{Address, Env, Vec};
+use crate::types::{
+    AccessibilityBooking, AccessibilityInventory, CurrencyConfig, Event, Seat, Ticket,
+    TicketTransferRecord, VenueLayout, VipTier, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
+};
+use soroban_sdk::{Address, Env, String, Vec};
 
 // Storage keys
 const INITIALIZED: &str = "INIT";
@@ -14,6 +17,13 @@ const ESCROW_PREFIX: &str = "ESCROW_";
 const PLATFORM_FEE_BPS: &str = "PLATFORM_FEE_BPS";
 const PLATFORM_BALANCE: &str = "PLATFORM_BAL";
 const TRANSFER_HISTORY_PREFIX: &str = "TXHIST_";
+const VIP_TIER_PREFIX: &str = "VIP_";
+const ACCESSIBILITY_INV_PREFIX: &str = "ACCINV_";
+const ACCESSIBILITY_BOOKING_PREFIX: &str = "ACCBOOK_";
+const VENUE_LAYOUT_PREFIX: &str = "VENUE_";
+const SEAT_PREFIX: &str = "SEAT_";
+const CURRENCY_CONFIG_PREFIX: &str = "CURCFG_";
+const ACC_BOOKING_COUNTER: &str = "ACC_CTR";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -288,4 +298,172 @@ pub fn get_ticket_transfer_history(
             .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
     }
     history
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VIP TIER STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn set_vip_tier(env: &Env, event_id: u64, tier_name: &String, tier: &VipTier) {
+    let key = (VIP_TIER_PREFIX, event_id, tier_name.clone());
+    env.storage().persistent().set(&key, tier);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_vip_tier(env: &Env, event_id: u64, tier_name: &String) -> Result<VipTier, LumentixError> {
+    let key = (VIP_TIER_PREFIX, event_id, tier_name.clone());
+    let tier = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::VipTierNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(tier)
+}
+
+pub fn has_vip_tier(env: &Env, event_id: u64, tier_name: &String) -> bool {
+    let key = (VIP_TIER_PREFIX, event_id, tier_name.clone());
+    env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACCESSIBILITY STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn set_accessibility_inventory(env: &Env, event_id: u64, inv: &AccessibilityInventory) {
+    let key = (ACCESSIBILITY_INV_PREFIX, event_id);
+    env.storage().persistent().set(&key, inv);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_accessibility_inventory(env: &Env, event_id: u64) -> Result<AccessibilityInventory, LumentixError> {
+    let key = (ACCESSIBILITY_INV_PREFIX, event_id);
+    let inv = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::AccessibilityNotConfigured)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(inv)
+}
+
+pub fn get_next_accessibility_booking_id(env: &Env) -> u64 {
+    let id = env.storage().instance().get(&ACC_BOOKING_COUNTER).unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_accessibility_booking_id(env: &Env) {
+    let next_id = get_next_accessibility_booking_id(env) + 1;
+    env.storage().instance().set(&ACC_BOOKING_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_accessibility_booking(env: &Env, booking_id: u64, booking: &AccessibilityBooking) {
+    let key = (ACCESSIBILITY_BOOKING_PREFIX, booking_id);
+    env.storage().persistent().set(&key, booking);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_accessibility_booking(env: &Env, booking_id: u64) -> Result<AccessibilityBooking, LumentixError> {
+    let key = (ACCESSIBILITY_BOOKING_PREFIX, booking_id);
+    let booking = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::AccessibilityBookingNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(booking)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VENUE LAYOUT / SEAT STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn set_venue_layout(env: &Env, event_id: u64, layout: &VenueLayout) {
+    let key = (VENUE_LAYOUT_PREFIX, event_id);
+    env.storage().persistent().set(&key, layout);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_venue_layout(env: &Env, event_id: u64) -> Result<VenueLayout, LumentixError> {
+    let key = (VENUE_LAYOUT_PREFIX, event_id);
+    let layout = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::VenueLayoutNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(layout)
+}
+
+pub fn set_seat(env: &Env, event_id: u64, seat_id: &String, seat: &Seat) {
+    let key = (SEAT_PREFIX, event_id, seat_id.clone());
+    env.storage().persistent().set(&key, seat);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_seat(env: &Env, event_id: u64, seat_id: &String) -> Result<Seat, LumentixError> {
+    let key = (SEAT_PREFIX, event_id, seat_id.clone());
+    let seat = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::SeatNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(seat)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CURRENCY CONFIG STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn set_currency_config(env: &Env, code: &String, config: &CurrencyConfig) {
+    let key = (CURRENCY_CONFIG_PREFIX, code.clone());
+    env.storage().instance().set(&key, config);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn get_currency_config(env: &Env, code: &String) -> Result<CurrencyConfig, LumentixError> {
+    let key = (CURRENCY_CONFIG_PREFIX, code.clone());
+    let config = env
+        .storage()
+        .instance()
+        .get(&key)
+        .ok_or(LumentixError::UnsupportedCurrency)?;
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    Ok(config)
+}
+
+pub fn has_currency(env: &Env, code: &String) -> bool {
+    let key = (CURRENCY_CONFIG_PREFIX, code.clone());
+    env.storage().instance().has(&key)
 }

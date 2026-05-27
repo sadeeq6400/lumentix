@@ -30,6 +30,10 @@ pub struct Event {
     pub tickets_sold: u32,
     pub status: EventStatus,
     pub paused: bool,
+    pub currency: String,
+    pub accessibility_wheelchair: u32,
+    pub accessibility_hearing: u32,
+    pub accessibility_visual: u32,
 }
 
 /// Ticket structure
@@ -44,6 +48,9 @@ pub struct Ticket {
     pub refunded: bool,
     /// Set by admin via [`crate::lumentix_contract::LumentixContract::revoke_ticket`]; invalidates the ticket.
     pub revoked: bool,
+    pub vip_tier: Option<String>,
+    pub seat_id: Option<String>,
+    pub accessibility_type: Option<String>,
 }
 
 /// A single record in a ticket's transfer history
@@ -78,4 +85,90 @@ pub struct FeeCollectedEvent {
     pub event_id: u64,
     pub platform_fee: i128,
     pub organizer_amount: i128,
+}
+
+// ── VIP Tier System ────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VipTier {
+    pub name: String,
+    pub price: i128,
+    pub max_slots: u32,
+    pub filled_slots: u32,
+    pub benefits: Vec<String>,
+}
+
+// ── Accessibility Features ─────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccessibilityInventory {
+    pub wheelchair_available: u32,
+    pub wheelchair_total: u32,
+    pub hearing_available: u32,
+    pub hearing_total: u32,
+    pub visual_available: u32,
+    pub visual_total: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccessibilityBooking {
+    pub id: u64,
+    pub event_id: u64,
+    pub ticket_id: u64,
+    pub attendee: Address,
+    pub accommodation_type: String,
+    pub approved: bool,
+}
+
+// ── Seat Selection / Venue Mapping ─────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SeatCategory {
+    Standard,
+    Premium,
+    Vip,
+    Balcony,
+    Floor,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VenueSection {
+    pub name: String,
+    pub category: SeatCategory,
+    pub rows: u32,
+    pub seats_per_row: u32,
+    pub price_multiplier: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VenueLayout {
+    pub sections: Vec<VenueSection>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Seat {
+    pub section: String,
+    pub row: u32,
+    pub number: u32,
+    pub occupied: bool,
+    pub held_until: u64,
+    pub held_by: Option<Address>,
+}
+
+// ── Multi-Currency ─────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrencyConfig {
+    pub code: String,
+    pub decimals: u32,
+    pub oracle_price: i128,
+    pub last_updated: u64,
 }

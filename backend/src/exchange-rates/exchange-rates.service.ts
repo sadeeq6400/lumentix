@@ -90,6 +90,12 @@ export class ExchangeRatesService {
       );
     }
   }
+  async getSupportedCurrencies(): Promise<string[]> {
+    const rates = await this.ratesRepository.find({ select: ['fromCode'] });
+    const codes = new Set(rates.map(r => r.fromCode));
+    return Array.from(codes);
+  }
+
   async create(
     createExchangeRateDto: Partial<ExchangeRate>,
   ): Promise<ExchangeRate> {

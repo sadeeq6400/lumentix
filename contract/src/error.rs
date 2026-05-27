@@ -71,4 +71,42 @@ pub enum LumentixError {
 
     /// Ticket was administratively revoked and cannot be used or transferred
     RevokedTicket = 22,
+
+    // VIP Tier errors (23–29)
+    /// VIP tier not found
+    VipTierNotFound = 23,
+    /// VIP tier is full
+    VipTierFull = 24,
+    /// VIP tier already exists for this event
+    VipTierAlreadyExists = 25,
+
+    // Accessibility errors (30–35)
+    /// No accessibility inventory configured for event
+    AccessibilityNotConfigured = 30,
+    /// Requested accommodation type is not available
+    AccommodationUnavailable = 31,
+    /// Accessibility booking not found
+    AccessibilityBookingNotFound = 32,
+
+    // Seat / Venue errors (36–42)
+    /// Venue layout not configured for event
+    VenueLayoutNotFound = 36,
+    /// Seat not found in venue layout
+    SeatNotFound = 37,
+    /// Seat is already occupied
+    SeatAlreadyOccupied = 38,
+    /// Seat is currently held by another user
+    SeatHeld = 39,
+    /// Seat hold has expired
+    SeatHoldExpired = 40,
+    /// Invalid seat category
+    InvalidSeatCategory = 41,
+
+    // Currency errors (43–46)
+    /// Currency not supported
+    UnsupportedCurrency = 43,
+    /// Oracle price not available
+    OraclePriceNotFound = 44,
+    /// Currency conversion error
+    CurrencyConversionError = 45,
 }

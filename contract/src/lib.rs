@@ -238,6 +238,9 @@ mod get_protocol_fee_test;
 #[cfg(test)]
 mod withdraw_platform_fees_test;
 
+#[cfg(test)]
+mod vip_accessibility_currency_seat_tests;
+
 pub use contract::TicketContract;
 pub use error::LumentixError;
 pub use events::{CheckInEvent, EventCancelled, EventMetadataUpdated, EventSalesPaused, EventSalesResumed, TransferEvent};

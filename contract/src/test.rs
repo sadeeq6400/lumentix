@@ -3712,6 +3712,9 @@ fn test_get_ticket_validity_false_for_ticket_on_draft_event() {
                 used: false,
                 refunded: false,
                 revoked: false,
+                vip_tier: None,
+                seat_id: None,
+                accessibility_type: None,
             },
         );
         ticket_id
@@ -3882,6 +3885,9 @@ fn test_transfer_ticket_draft_event_fails() {
                 used: false,
                 refunded: false,
                 revoked: false,
+                vip_tier: None,
+                seat_id: None,
+                accessibility_type: None,
             },
         );
         ticket_id

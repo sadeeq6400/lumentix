@@ -2,14 +2,21 @@
 
 use crate::error::LumentixError;
 use crate::events::{
-    AdminChanged, BatchTicketsPurchased, BatchTicketsTransferred, EscrowReleased, EventCancelled,
-    EventCompleted, EventCreated, EventMetadataUpdated, EventSalesPaused, EventSalesResumed,
-    EventStatusChanged, EventUpdated, FundsDeposited, FundsWithdrawn, PlatformFeeRecipientUpdated,
-    PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried, BatchTicketsUsed,
-    TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed,
+    AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, BatchTicketsPurchased,
+    BatchTicketsTransferred, BatchTicketsUsed, EscrowReleased, EventCancelled, EventCapacityChanged,
+    EventCompleted, EventCreated, EventCurrencySet, EventMetadataUpdated, EventSalesPaused,
+    EventSalesResumed, EventStatusChanged, EventTimeExtended, EventUpdated, FundsDeposited,
+    FundsWithdrawn, GenericEventStateTransition, OraclePriceUpdated, PlatformFeeRecipientUpdated,
+    PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried, SeatHoldReleased, SeatSelected,
+    TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed, VenueLayoutCreated,
+    VipTierCreated, VipTicketAssigned,
 };
 use crate::storage;
-use crate::types::{Event, EventStatus, Ticket, TicketTransferRecord, PERSISTENT_LIFETIME};
+use crate::types::{
+    AccessibilityBooking, AccessibilityInventory, CurrencyConfig, Event, EventStatus, Seat,
+    Ticket, TicketTransferRecord, VenueLayout, VenueSection, VipTier,
+    PERSISTENT_LIFETIME,
+};
 use crate::validation;
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec, Map};
 
@@ -70,6 +77,10 @@ impl LumentixContract {
             tickets_sold: 0,
             status: EventStatus::Draft,
             paused: false,
+            currency: String::from_str(&env, "USD"),
+            accessibility_wheelchair: 0,
+            accessibility_hearing: 0,
+            accessibility_visual: 0,
         };
 
         storage::set_event(&env, event_id, &event);
@@ -160,39 +171,6 @@ impl LumentixContract {
 
         Ok(())
     }
-
-    /// Set event capacity. Only the event organizer can update capacity.
-    /// The new capacity cannot be lower than the number of tickets already sold.
-    pub fn set_event_capacity(
-        env: Env,
-        event_id: u64,
-        new_capacity: u32,
-    /// Extend event end time. Only the event organizer can extend the event.
-    /// The new end time must be later than the current end time.
-    pub fn extend_event_end_time(
-        env: Env,
-        event_id: u64,
-        new_end_time: u64,
-    ) -> Result<(), LumentixError> {
-        let mut event = storage::get_event(&env, event_id)?;
-
-        event.organizer.require_auth();
-        validation::validate_positive_capacity(new_capacity)?;
-
-        if new_capacity < event.tickets_sold {
-            return Err(LumentixError::CapacityExceeded);
-        }
-
-        event.max_tickets = new_capacity;
-        storage::set_event(&env, event_id, &event);
-
-
-        if new_end_time <= event.end_time {
-            return Err(LumentixError::InvalidTimeRange);
-        }
-
-        event.end_time = new_end_time;
-        storage::set_event(&env, event_id, &event);
 
     /// Update event metadata for a published event (name, description, location, times, price, capacity).
     /// Unlike update_event (Draft-only), this allows organizers to correct metadata on live events.
@@ -432,6 +410,9 @@ impl LumentixContract {
             used: false,
             refunded: false,
             revoked: false,
+            vip_tier: None,
+            seat_id: None,
+            accessibility_type: None,
         };
 
         storage::set_ticket(&env, ticket_id, &ticket);
@@ -529,6 +510,9 @@ impl LumentixContract {
                 used: false,
                 refunded: false,
                 revoked: false,
+                vip_tier: None,
+                seat_id: None,
+                accessibility_type: None,
             };
 
             storage::set_ticket(&env, ticket_id, &ticket);
@@ -816,47 +800,6 @@ impl LumentixContract {
 
         // Emit TicketRefunded event
         TicketRefunded::emit(&env, ticket_id, ticket.event_id, buyer, event.ticket_price);
-
-        Ok(())
-    }
-
-    /// Revoke a ticket by admin action.
-    /// Marks the ticket as refunded and used to prevent entry.
-    /// Emits TicketRevoked event for audit trail and off-chain trust graphs.
-    pub fn revoke_ticket(
-        env: Env,
-        admin: Address,
-        ticket_id: u64,
-        reason: Option<String>,
-    ) -> Result<(), LumentixError> {
-        admin.require_auth();
-
-        // Verify caller is the admin
-        let stored_admin = storage::get_admin(&env);
-        if stored_admin != admin {
-            return Err(LumentixError::Unauthorized);
-        }
-
-        let mut ticket = storage::get_ticket(&env, ticket_id)?;
-
-        // Already revoked/refunded tickets cannot be revoked again
-        if ticket.refunded {
-            return Err(LumentixError::RefundNotAllowed);
-        }
-
-        let mut event = storage::get_event(&env, ticket.event_id)?;
-
-        // Mark ticket as refunded and used to prevent entry
-        ticket.refunded = true;
-        ticket.used = true;
-        storage::set_ticket(&env, ticket_id, &ticket);
-
-        // Decrement tickets_sold to free up capacity
-        event.tickets_sold = event.tickets_sold.saturating_sub(1);
-        storage::set_event(&env, ticket.event_id, &event);
-
-        // Emit TicketRevoked event for audit trail
-        TicketRevoked::emit(&env, admin, ticket_id, ticket.event_id, reason);
 
         Ok(())
     }
@@ -1722,5 +1665,625 @@ impl LumentixContract {
         }
 
         Ok(attendees)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // VIP TIER SYSTEM
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Create a VIP tier for an event. Only the organizer can call this.
+    pub fn create_vip_tier(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        tier_name: String,
+        price: i128,
+        max_slots: u32,
+        benefits: Vec<String>,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        validation::validate_string_not_empty(&tier_name)?;
+        validation::validate_positive_amount(price)?;
+        validation::validate_positive_slots(max_slots)?;
+
+        if storage::has_vip_tier(&env, event_id, &tier_name) {
+            return Err(LumentixError::VipTierAlreadyExists);
+        }
+
+        let tier = VipTier {
+            name: tier_name.clone(),
+            price,
+            max_slots,
+            filled_slots: 0,
+            benefits,
+        };
+
+        storage::set_vip_tier(&env, event_id, &tier_name, &tier);
+
+        VipTierCreated::emit(&env, event_id, tier_name, price, max_slots);
+
+        Ok(())
+    }
+
+    /// Assign VIP benefits to a ticket. Validates the tier has available slots.
+    pub fn assign_vip_benefits(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        ticket_id: u64,
+        tier_name: String,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let mut tier = storage::get_vip_tier(&env, event_id, &tier_name)?;
+
+        if tier.filled_slots >= tier.max_slots {
+            return Err(LumentixError::VipTierFull);
+        }
+
+        let mut ticket = storage::get_ticket(&env, ticket_id)?;
+        if ticket.event_id != event_id {
+            return Err(LumentixError::Unauthorized);
+        }
+        if ticket.revoked {
+            return Err(LumentixError::RevokedTicket);
+        }
+        if ticket.refunded {
+            return Err(LumentixError::RefundNotAllowed);
+        }
+
+        tier.filled_slots += 1;
+        storage::set_vip_tier(&env, event_id, &tier_name, &tier);
+
+        ticket.vip_tier = Some(tier_name.clone());
+        storage::set_ticket(&env, ticket_id, &ticket);
+
+        VipTicketAssigned::emit(&env, ticket_id, event_id, tier_name, ticket.owner);
+
+        Ok(())
+    }
+
+    /// Validate that a ticket has VIP access for a given tier.
+    /// Used at check-in to verify VIP entitlements.
+    pub fn validate_vip_access(
+        env: Env,
+        ticket_id: u64,
+        tier_name: String,
+    ) -> Result<bool, LumentixError> {
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+
+        if ticket.revoked || ticket.refunded || ticket.used {
+            return Ok(false);
+        }
+
+        match &ticket.vip_tier {
+            Some(tier) => Ok(tier == &tier_name),
+            None => Ok(false),
+        }
+    }
+
+    /// Get VIP tier details for an event.
+    pub fn get_vip_tier(
+        env: Env,
+        event_id: u64,
+        tier_name: String,
+    ) -> Result<VipTier, LumentixError> {
+        storage::get_vip_tier(&env, event_id, &tier_name)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ACCESSIBILITY FEATURES
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Configure accessibility inventory for an event. Only organizer can call.
+    pub fn setup_accessibility_inventory(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        wheelchair_total: u32,
+        hearing_total: u32,
+        visual_total: u32,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let mut event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let inv = AccessibilityInventory {
+            wheelchair_available: wheelchair_total,
+            wheelchair_total,
+            hearing_available: hearing_total,
+            hearing_total,
+            visual_available: visual_total,
+            visual_total,
+        };
+
+        storage::set_accessibility_inventory(&env, event_id, &inv);
+
+        event.accessibility_wheelchair = wheelchair_total;
+        event.accessibility_hearing = hearing_total;
+        event.accessibility_visual = visual_total;
+        storage::set_event(&env, event_id, &event);
+
+        AccessibilityInventoryUpdated::emit(&env, event_id, wheelchair_total, hearing_total, visual_total);
+
+        Ok(())
+    }
+
+    /// Request an accessibility accommodation for a ticket.
+    pub fn request_accessibility_booking(
+        env: Env,
+        attendee: Address,
+        event_id: u64,
+        ticket_id: u64,
+        accommodation_type: String,
+    ) -> Result<u64, LumentixError> {
+        attendee.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+        if ticket.owner != attendee {
+            return Err(LumentixError::Unauthorized);
+        }
+        if ticket.event_id != event_id {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let mut inv = storage::get_accessibility_inventory(&env, event_id)?;
+
+        if accommodation_type == String::from_str(&env, "wheelchair") {
+            if inv.wheelchair_available == 0 {
+                return Err(LumentixError::AccommodationUnavailable);
+            }
+            inv.wheelchair_available -= 1;
+        } else if accommodation_type == String::from_str(&env, "hearing") {
+            if inv.hearing_available == 0 {
+                return Err(LumentixError::AccommodationUnavailable);
+            }
+            inv.hearing_available -= 1;
+        } else if accommodation_type == String::from_str(&env, "visual") {
+            if inv.visual_available == 0 {
+                return Err(LumentixError::AccommodationUnavailable);
+            }
+            inv.visual_available -= 1;
+        } else {
+            return Err(LumentixError::AccommodationUnavailable);
+        }
+
+        storage::set_accessibility_inventory(&env, event_id, &inv);
+
+        let booking_id = storage::get_next_accessibility_booking_id(&env);
+        storage::increment_accessibility_booking_id(&env);
+
+        let booking = AccessibilityBooking {
+            id: booking_id,
+            event_id,
+            ticket_id,
+            attendee: attendee.clone(),
+            accommodation_type: accommodation_type.clone(),
+            approved: true,
+        };
+
+        storage::set_accessibility_booking(&env, booking_id, &booking);
+
+        AccessibilityBooked::emit(&env, booking_id, event_id, attendee, accommodation_type);
+
+        Ok(booking_id)
+    }
+
+    /// Manage (update) accessibility inventory for an event. Only organizer.
+    pub fn manage_accessibility_inventory(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        wheelchair_available: u32,
+        hearing_available: u32,
+        visual_available: u32,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let mut inv = storage::get_accessibility_inventory(&env, event_id)?;
+
+        validation::validate_accessibility_counts(wheelchair_available, inv.wheelchair_total)?;
+        validation::validate_accessibility_counts(hearing_available, inv.hearing_total)?;
+        validation::validate_accessibility_counts(visual_available, inv.visual_total)?;
+
+        inv.wheelchair_available = wheelchair_available;
+        inv.hearing_available = hearing_available;
+        inv.visual_available = visual_available;
+
+        storage::set_accessibility_inventory(&env, event_id, &inv);
+
+        AccessibilityInventoryUpdated::emit(&env, event_id, wheelchair_available, hearing_available, visual_available);
+
+        Ok(())
+    }
+
+    /// Validate that an attendee's accessibility needs can be met.
+    pub fn validate_accessibility_needs(
+        env: Env,
+        event_id: u64,
+        accommodation_type: String,
+    ) -> Result<bool, LumentixError> {
+        if let Ok(inv) = storage::get_accessibility_inventory(&env, event_id) {
+            let available = if accommodation_type == String::from_str(&env, "wheelchair") {
+                inv.wheelchair_available
+            } else if accommodation_type == String::from_str(&env, "hearing") {
+                inv.hearing_available
+            } else if accommodation_type == String::from_str(&env, "visual") {
+                inv.visual_available
+            } else {
+                return Err(LumentixError::AccommodationUnavailable);
+            };
+            Ok(available > 0)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Get the accessibility booking for a given booking ID.
+    pub fn get_accessibility_booking(
+        env: Env,
+        booking_id: u64,
+    ) -> Result<AccessibilityBooking, LumentixError> {
+        storage::get_accessibility_booking(&env, booking_id)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // MULTI-CURRENCY SUPPORT
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Set a currency oracle price feed. Only the admin can register a currency.
+    pub fn set_currency_oracle(
+        env: Env,
+        admin: Address,
+        code: String,
+        decimals: u32,
+        oracle_price: i128,
+    ) -> Result<(), LumentixError> {
+        admin.require_auth();
+
+        let stored_admin = storage::get_admin(&env);
+        if stored_admin != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        validation::validate_currency_code(&code)?;
+
+        let config = CurrencyConfig {
+            code: code.clone(),
+            decimals,
+            oracle_price,
+            last_updated: env.ledger().timestamp(),
+        };
+
+        storage::set_currency_config(&env, &code, &config);
+
+        OraclePriceUpdated::emit(&env, code, oracle_price, env.ledger().timestamp());
+
+        Ok(())
+    }
+
+    /// Set the currency for an event. Only the organizer can set it.
+    /// The currency must have been registered via set_currency_oracle.
+    pub fn set_event_currency(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        currency: String,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let mut event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        validation::validate_currency_code(&currency)?;
+
+        if event.status == EventStatus::Completed || event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        if !storage::has_currency(&env, &currency) {
+            return Err(LumentixError::UnsupportedCurrency);
+        }
+
+        event.currency = currency.clone();
+        storage::set_event(&env, event_id, &event);
+
+        EventCurrencySet::emit(&env, event_id, currency);
+
+        Ok(())
+    }
+
+    /// Convert a price from one currency to another using oracle price feeds.
+    pub fn convert_price(
+        env: Env,
+        from_currency: String,
+        to_currency: String,
+        amount: i128,
+    ) -> Result<i128, LumentixError> {
+        if from_currency == to_currency {
+            return Ok(amount);
+        }
+
+        let from_config = storage::get_currency_config(&env, &from_currency)?;
+        let to_config = storage::get_currency_config(&env, &to_currency)?;
+
+        if from_config.oracle_price <= 0 || to_config.oracle_price <= 0 {
+            return Err(LumentixError::OraclePriceNotFound);
+        }
+
+        let converted = amount * from_config.oracle_price / to_config.oracle_price;
+
+        if converted <= 0 && amount > 0 {
+            return Err(LumentixError::CurrencyConversionError);
+        }
+
+        Ok(converted)
+    }
+
+    /// Handle currency fluctuation by updating oracle price and returning new converted amount.
+    pub fn handle_currency_fluctuation(
+        env: Env,
+        admin: Address,
+        currency: String,
+        new_oracle_price: i128,
+        amount: i128,
+        to_currency: String,
+    ) -> Result<i128, LumentixError> {
+        admin.require_auth();
+
+        let stored_admin = storage::get_admin(&env);
+        if stored_admin != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if new_oracle_price <= 0 {
+            return Err(LumentixError::OraclePriceNotFound);
+        }
+
+        let mut config = storage::get_currency_config(&env, &currency)?;
+        config.oracle_price = new_oracle_price;
+        config.last_updated = env.ledger().timestamp();
+        storage::set_currency_config(&env, &currency, &config);
+
+        OraclePriceUpdated::emit(&env, currency.clone(), new_oracle_price, env.ledger().timestamp());
+
+        Self::convert_price(env, currency, to_currency, amount)
+    }
+
+    /// Get the currency config for a given code.
+    pub fn get_currency_config(
+        env: Env,
+        code: String,
+    ) -> Result<CurrencyConfig, LumentixError> {
+        storage::get_currency_config(&env, &code)
+    }
+
+    /// Get the event currency.
+    pub fn get_event_currency(env: Env, event_id: u64) -> Result<String, LumentixError> {
+        let event = storage::get_event(&env, event_id)?;
+        Ok(event.currency)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // SEAT SELECTION / VENUE MAPPING
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Create a venue layout for an event. Only the organizer can call this.
+    pub fn create_venue_layout(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        sections: Vec<VenueSection>,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let layout = VenueLayout {
+            sections: sections.clone(),
+        };
+
+        storage::set_venue_layout(&env, event_id, &layout);
+
+        // Generate individual seat entries
+        for section in sections.iter() {
+            for row in 1..=section.rows {
+                for num in 1..=section.seats_per_row {
+                    let seat_id = Self::build_seat_id(&env, &section.name, row, num);
+                    let seat = Seat {
+                        section: section.name.clone(),
+                        row,
+                        number: num,
+                        occupied: false,
+                        held_until: 0,
+                        held_by: None,
+                    };
+                    storage::set_seat(&env, event_id, &seat_id, &seat);
+                }
+            }
+        }
+
+        VenueLayoutCreated::emit(&env, event_id, sections.len());
+
+        Ok(())
+    }
+
+    /// Select (hold) a seat for a buyer. The hold expires after the given duration.
+    pub fn select_seat(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        section: String,
+        row: u32,
+        number: u32,
+        hold_duration: u64,
+    ) -> Result<String, LumentixError> {
+        buyer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+        if event.paused {
+            return Err(LumentixError::EventPaused);
+        }
+
+        let seat_id = Self::build_seat_id(&env, &section, row, number);
+        let mut seat = storage::get_seat(&env, event_id, &seat_id)?;
+
+        if seat.occupied {
+            return Err(LumentixError::SeatAlreadyOccupied);
+        }
+
+        let now = env.ledger().timestamp();
+        if seat.held_until > now {
+            return Err(LumentixError::SeatHeld);
+        }
+
+        seat.held_by = Some(buyer.clone());
+        seat.held_until = now + hold_duration;
+        storage::set_seat(&env, event_id, &seat_id, &seat);
+
+        SeatSelected::emit(&env, event_id, seat_id.clone(), buyer, seat.held_until);
+
+        Ok(seat_id)
+    }
+
+    /// Release a held seat. Only the holder or the organizer can release it.
+    pub fn release_seat_hold(
+        env: Env,
+        caller: Address,
+        event_id: u64,
+        section: String,
+        row: u32,
+        number: u32,
+    ) -> Result<(), LumentixError> {
+        caller.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+
+        let seat_id = Self::build_seat_id(&env, &section, row, number);
+        let mut seat = storage::get_seat(&env, event_id, &seat_id)?;
+
+        let is_holder = match &seat.held_by {
+            Some(addr) => addr == &caller,
+            None => false,
+        };
+        let is_organizer = event.organizer == caller;
+
+        if !is_holder && !is_organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        seat.held_by = None;
+        seat.held_until = 0;
+        storage::set_seat(&env, event_id, &seat_id, &seat);
+
+        SeatHoldReleased::emit(&env, event_id, seat_id);
+
+        Ok(())
+    }
+
+    /// Validate that a seat is available for booking.
+    pub fn validate_seat_availability(
+        env: Env,
+        event_id: u64,
+        section: String,
+        row: u32,
+        number: u32,
+    ) -> Result<bool, LumentixError> {
+        let seat_id = Self::build_seat_id(&env, &section, row, number);
+        let seat = storage::get_seat(&env, event_id, &seat_id)?;
+
+        if seat.occupied {
+            return Ok(false);
+        }
+
+        let now = env.ledger().timestamp();
+        if seat.held_until > now {
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
+    /// Get the venue layout for an event.
+    pub fn get_venue_layout(
+        env: Env,
+        event_id: u64,
+    ) -> Result<VenueLayout, LumentixError> {
+        storage::get_venue_layout(&env, event_id)
+    }
+
+    /// Get seat information.
+    pub fn get_seat_info(
+        env: Env,
+        event_id: u64,
+        section: String,
+        row: u32,
+        number: u32,
+    ) -> Result<Seat, LumentixError> {
+        let seat_id = Self::build_seat_id(&env, &section, row, number);
+        storage::get_seat(&env, event_id, &seat_id)
+    }
+
+    // ── Internal helpers ─────────────────────────────────────────────────────
+
+    fn build_seat_id(env: &Env, section: &String, row: u32, number: u32) -> String {
+        let sec = section.to_bytes();
+        let mut buf = [0u8; 64];
+        let mut i = 0;
+        for b in sec.iter() {
+            if i < 62 { buf[i] = b; i += 1; }
+        }
+        buf[i] = b'-'; i += 1;
+        let r_str = match row {
+            0 => "0", 1 => "1", 2 => "2", 3 => "3", 4 => "4", 5 => "5",
+            6 => "6", 7 => "7", 8 => "8", 9 => "9", 10 => "10",
+            _ => "0",
+        };
+        for b in r_str.bytes() {
+            if i < 63 { buf[i] = b; i += 1; }
+        }
+        buf[i] = b'-'; i += 1;
+        let n_str = match number {
+            0 => "0", 1 => "1", 2 => "2", 3 => "3", 4 => "4", 5 => "5",
+            6 => "6", 7 => "7", 8 => "8", 9 => "9", 10 => "10",
+            _ => "0",
+        };
+        for b in n_str.bytes() {
+            if i < 64 { buf[i] = b; i += 1; }
+        }
+        let valid = core::str::from_utf8(&buf[..i]).unwrap_or("");
+        String::from_str(env, valid)
     }
 }

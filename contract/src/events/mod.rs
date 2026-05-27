@@ -436,3 +436,127 @@ impl EventTimeExtended {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VIP TIER EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Event emitted when a VIP tier is created for an event
+pub struct VipTierCreated;
+
+impl VipTierCreated {
+    pub fn emit(env: &Env, event_id: u64, tier_name: String, price: i128, max_slots: u32) {
+        env.events().publish(
+            (symbol_short!("vipcreate"),),
+            (event_id, tier_name, price, max_slots),
+        );
+    }
+}
+
+/// Event emitted when a VIP ticket is assigned to a tier
+pub struct VipTicketAssigned;
+
+impl VipTicketAssigned {
+    pub fn emit(env: &Env, ticket_id: u64, event_id: u64, tier_name: String, owner: Address) {
+        env.events().publish(
+            (symbol_short!("vipassign"),),
+            (ticket_id, event_id, tier_name, owner),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACCESSIBILITY EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Event emitted when accessibility inventory is configured
+pub struct AccessibilityInventoryUpdated;
+
+impl AccessibilityInventoryUpdated {
+    pub fn emit(env: &Env, event_id: u64, wheelchair: u32, hearing: u32, visual: u32) {
+        env.events().publish(
+            (symbol_short!("accinvup"),),
+            (event_id, wheelchair, hearing, visual),
+        );
+    }
+}
+
+/// Event emitted when an accessibility booking is made
+pub struct AccessibilityBooked;
+
+impl AccessibilityBooked {
+    pub fn emit(env: &Env, booking_id: u64, event_id: u64, attendee: Address, accommodation_type: String) {
+        env.events().publish(
+            (symbol_short!("accbooked"),),
+            (booking_id, event_id, attendee, accommodation_type),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VENUE / SEAT EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Event emitted when a venue layout is created
+pub struct VenueLayoutCreated;
+
+impl VenueLayoutCreated {
+    pub fn emit(env: &Env, event_id: u64, sections: u32) {
+        env.events().publish(
+            (symbol_short!("vencreate"),),
+            (event_id, sections),
+        );
+    }
+}
+
+/// Event emitted when a seat is selected/held
+pub struct SeatSelected;
+
+impl SeatSelected {
+    pub fn emit(env: &Env, event_id: u64, seat_id: String, occupant: Address, held_until: u64) {
+        env.events().publish(
+            (symbol_short!("seatsel"),),
+            (event_id, seat_id, occupant, held_until),
+        );
+    }
+}
+
+/// Event emitted when a seat hold is released
+pub struct SeatHoldReleased;
+
+impl SeatHoldReleased {
+    pub fn emit(env: &Env, event_id: u64, seat_id: String) {
+        env.events().publish(
+            (symbol_short!("seatrele"),),
+            (event_id, seat_id),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CURRENCY EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Event emitted when an event currency is set
+pub struct EventCurrencySet;
+
+impl EventCurrencySet {
+    pub fn emit(env: &Env, event_id: u64, currency: String) {
+        env.events().publish(
+            (symbol_short!("curset"),),
+            (event_id, currency),
+        );
+    }
+}
+
+/// Event emitted when an oracle price is updated
+pub struct OraclePriceUpdated;
+
+impl OraclePriceUpdated {
+    pub fn emit(env: &Env, currency: String, price: i128, timestamp: u64) {
+        env.events().publish(
+            (symbol_short!("oracleprc"),),
+            (currency, price, timestamp),
+        );
+    }
+}
