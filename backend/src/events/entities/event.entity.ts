@@ -61,6 +61,9 @@ export class Event {
   @Column()
   organizerId: string;
 
+  @Column({ nullable: true, type: 'uuid' })
+  seriesId: string | null;
+
   @Column({
     type: 'enum',
     enum: EventStatus,
@@ -119,6 +122,11 @@ export class Event {
   categories: Category[];
 
   /**
+   * Timestamp when the escrow account was merged (closed) after a full refund.
+   * NULL means the account has not been merged yet.
+   */
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  mergedAt: Date | null;
    * Optional webhook URL for outbound payment status notifications.
    * When set, a signed POST request is sent on each payment status transition.
    */
