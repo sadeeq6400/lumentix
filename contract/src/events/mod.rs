@@ -1005,3 +1005,107 @@ impl CrossChainTransferCompleted {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MERCHANDISE & NFT COLLECTIBLE EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when event merchandise is created
+pub struct MerchandiseCreated;
+
+impl MerchandiseCreated {
+    pub fn emit(
+        env: &Env,
+        merchandise_id: u64,
+        event_id: u64,
+        organizer: Address,
+        name: String,
+        price: i128,
+        total_supply: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("merccreate"),),
+            (
+                merchandise_id,
+                event_id,
+                organizer,
+                name,
+                price,
+                total_supply,
+            ),
+        );
+    }
+}
+
+/// Emitted when a merchandise item is purchased
+pub struct MerchandisePurchased;
+
+impl MerchandisePurchased {
+    pub fn emit(
+        env: &Env,
+        merchandise_id: u64,
+        event_id: u64,
+        buyer: Address,
+        price: i128,
+        remaining_supply: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("mercbuy"),),
+            (
+                merchandise_id,
+                event_id,
+                buyer,
+                price,
+                remaining_supply,
+            ),
+        );
+    }
+}
+
+/// Emitted when a commemorative NFT is minted
+pub struct NftMinted;
+
+impl NftMinted {
+    pub fn emit(
+        env: &Env,
+        nft_id: u64,
+        event_id: u64,
+        owner: Address,
+        rarity: crate::types::RarityTier,
+        minted_at: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("nftmint"),),
+            (nft_id, event_id, owner, rarity, minted_at),
+        );
+    }
+}
+
+/// Emitted when an NFT collectible is traded/transferred
+pub struct NftTraded;
+
+impl NftTraded {
+    pub fn emit(env: &Env, nft_id: u64, event_id: u64, from: Address, to: Address) {
+        env.events().publish(
+            (symbol_short!("nfttrade"),),
+            (nft_id, event_id, from, to),
+        );
+    }
+}
+
+/// Emitted when collectible inventory is configured or updated
+pub struct CollectibleInventoryUpdated;
+
+impl CollectibleInventoryUpdated {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        max_supply: u32,
+        total_minted: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("colinvup"),),
+            (event_id, max_supply, total_minted),
+        );
+    }
+}

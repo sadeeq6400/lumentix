@@ -5,26 +5,28 @@ use crate::events::{
     AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AttendanceVerificationFailed,
     AttendanceVerified, BatchTicketsPurchased, BatchTicketsTransferred, BatchTicketsUsed,
     BlockchainIdentityVerified, BridgeTransactionValidated, CarbonFootprintCalculated,
-    CarbonOffsetPurchased, CrossChainTransferCompleted, CrossChainTransferInitiated,
-    EnvironmentalImpactUpdated, EscrowReleased, EventCancelled, EventCapacityChanged,
-    EventCompleted, EventCreated, EventCurrencySet, EventMetadataUpdated, EventSalesPaused,
-    EventSalesResumed, EventStatusChanged, EventTimeExtended, EventUpdated, FundsDeposited,
-    FundsWithdrawn, GenericEventStateTransition, IdentityCredentialIssued,
+    CarbonOffsetPurchased, CollectibleInventoryUpdated, CrossChainTransferCompleted,
+    CrossChainTransferInitiated, EnvironmentalImpactUpdated, EscrowReleased, EventCancelled,
+    EventCapacityChanged, EventCompleted, EventCreated, EventCurrencySet, EventMetadataUpdated,
+    EventSalesPaused, EventSalesResumed, EventStatusChanged, EventTimeExtended, EventUpdated,
+    FundsDeposited, FundsWithdrawn, GenericEventStateTransition, IdentityCredentialIssued,
     IdentityCredentialRevoked, InsuranceClaimProcessed, InsurancePoolUpdated, InsurancePurchased,
-    OraclePriceUpdated, PlatformFeeRecipientUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn,
-    ProtocolFeeQueried, ReputationUpdated, ReviewSubmitted, SeatHoldReleased, SeatSelected,
-    TicketPurchased, TicketRefunded, TicketRevoked, TicketTransferred, TicketUsed, UpgradeExecuted,
+    MerchandiseCreated, MerchandisePurchased, NftMinted, NftTraded, OraclePriceUpdated,
+    PlatformFeeRecipientUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
+    ReputationUpdated, ReviewSubmitted, SeatHoldReleased, SeatSelected, TicketPurchased,
+    TicketRefunded, TicketRevoked, TicketTransferred, TicketUsed, UpgradeExecuted,
     UpgradeGovernanceConfigUpdated, UpgradeProposed, UpgradeVoteCast, VenueLayoutCreated,
     VipTicketAssigned, VipTierCreated, WaitlistAvailabilityNotified, WaitlistJoined,
 };
 use crate::storage;
 use crate::types::{
     AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CancellationReason,
-    CarbonFootprint, CarbonOffsetPurchase, CrossChainTransfer, CrossChainTransferStatus,
-    CurrencyConfig, EnvironmentalImpact, Event, EventReview, EventStatus, IdentityCredential,
-    IdentityProof, IdentityProvider, InsurancePolicy, OrganizerReputation, Seat, Ticket,
-    TicketTransferRecord, UpgradeGovernanceConfig, UpgradeProposal, UpgradeState, UpgradeVote,
-    VenueLayout, VenueSection, VipTier, WaitlistOffer, PERSISTENT_LIFETIME,
+    CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer,
+    CrossChainTransferStatus, CurrencyConfig, EnvironmentalImpact, Event, EventMerchandise,
+    EventReview, EventStatus, IdentityCredential, IdentityProof, IdentityProvider, InsurancePolicy,
+    NftCollectible, OrganizerReputation, RarityTier, Seat, Ticket, TicketTransferRecord,
+    UpgradeGovernanceConfig, UpgradeProposal, UpgradeState, UpgradeVote, VenueLayout, VenueSection,
+    VipTier, WaitlistOffer, PERSISTENT_LIFETIME,
 };
 use crate::validation;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String, Vec};
@@ -4127,5 +4129,330 @@ impl LumentixContract {
     /// Check if a chain is supported
     pub fn is_chain_supported(env: Env, chain: String) -> bool {
         storage::is_chain_supported(&env, &chain)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MERCHANDISE & NFT COLLECTIBLES
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Create event merchandise for sale.
+    /// Only the event organizer can create merchandise.
+    /// The event must exist and not be cancelled.
+    /// Emits MerchandiseCreated event.
+    pub fn create_event_merchandise(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        name: String,
+        description: String,
+        price: i128,
+        total_supply: u32,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        validation::validate_string_not_empty(&name)?;
+        validation::validate_string_not_empty(&description)?;
+        validation::validate_positive_amount(price)?;
+        validation::validate_positive_capacity(total_supply)?;
+
+        let merchandise_id = storage::get_next_merchandise_id(&env);
+        storage::increment_merchandise_id(&env);
+
+        let item = EventMerchandise {
+            id: merchandise_id,
+            event_id,
+            name: name.clone(),
+            description,
+            price,
+            total_supply,
+            remaining_supply: total_supply,
+            organizer: organizer.clone(),
+            active: true,
+        };
+
+        storage::set_merchandise(&env, merchandise_id, &item);
+
+        MerchandiseCreated::emit(
+            &env,
+            merchandise_id,
+            event_id,
+            organizer,
+            name,
+            price,
+            total_supply,
+        );
+
+        Ok(merchandise_id)
+    }
+
+    /// Purchase a merchandise item for an event.
+    /// Buyer must pay the listed price.
+    /// Decrements remaining_supply on success.
+    /// Emits MerchandisePurchased event.
+    pub fn purchase_merchandise(
+        env: Env,
+        buyer: Address,
+        merchandise_id: u64,
+    ) -> Result<(), LumentixError> {
+        buyer.require_auth();
+
+        let mut item = storage::get_merchandise(&env, merchandise_id)?;
+
+        if !item.active {
+            return Err(LumentixError::MerchandiseNotActive);
+        }
+
+        if item.remaining_supply == 0 {
+            return Err(LumentixError::MerchandiseSoldOut);
+        }
+
+        let event = storage::get_event(&env, item.event_id)?;
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        // Process token transfer if token is set
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&buyer, &env.current_contract_address(), &item.price);
+        }
+
+        // Add proceeds to event escrow
+        storage::add_escrow(&env, item.event_id, item.price);
+
+        item.remaining_supply -= 1;
+        storage::set_merchandise(&env, merchandise_id, &item);
+
+        MerchandisePurchased::emit(
+            &env,
+            merchandise_id,
+            item.event_id,
+            buyer,
+            item.price,
+            item.remaining_supply,
+        );
+
+        Ok(())
+    }
+
+    /// Get merchandise item by ID.
+    pub fn get_merchandise(
+        env: Env,
+        merchandise_id: u64,
+    ) -> Result<EventMerchandise, LumentixError> {
+        storage::get_merchandise(&env, merchandise_id)
+    }
+
+    /// Mint a commemorative NFT collectible for a special event.
+    /// Only the event organizer can mint NFTs.
+    /// Requires a collectible inventory to be configured first via manage_collectible_inventory.
+    /// Rarity tiers have limited supply tracked in the inventory.
+    /// Emits NftMinted event.
+    pub fn mint_commemorative_nft(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        recipient: Address,
+        name: String,
+        description: String,
+        rarity: RarityTier,
+        transferable: bool,
+        metadata_hash: soroban_sdk::BytesN<32>,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        validation::validate_string_not_empty(&name)?;
+        validation::validate_string_not_empty(&description)?;
+
+        // Collectible inventory must be configured
+        let mut inv = storage::get_collectible_inventory(&env, event_id)?;
+
+        if inv.total_minted >= inv.max_supply {
+            return Err(LumentixError::CollectibleMaxSupplyReached);
+        }
+
+        // Enforce per-rarity supply caps derived from max_supply:
+        // Legendary ≤ 1% of max_supply (min 1), Epic ≤ 5%, Rare ≤ 15%,
+        // Uncommon ≤ 30%, Common = remainder.
+        let max_supply = inv.max_supply;
+        let legendary_cap = (max_supply / 100).max(1);
+        let epic_cap = (max_supply * 5 / 100).max(1);
+        let rare_cap = (max_supply * 15 / 100).max(1);
+        let uncommon_cap = (max_supply * 30 / 100).max(1);
+
+        match &rarity {
+            RarityTier::Legendary => {
+                if inv.legendary_minted >= legendary_cap {
+                    return Err(LumentixError::RarityTierExhausted);
+                }
+                inv.legendary_minted += 1;
+            }
+            RarityTier::Epic => {
+                if inv.epic_minted >= epic_cap {
+                    return Err(LumentixError::RarityTierExhausted);
+                }
+                inv.epic_minted += 1;
+            }
+            RarityTier::Rare => {
+                if inv.rare_minted >= rare_cap {
+                    return Err(LumentixError::RarityTierExhausted);
+                }
+                inv.rare_minted += 1;
+            }
+            RarityTier::Uncommon => {
+                if inv.uncommon_minted >= uncommon_cap {
+                    return Err(LumentixError::RarityTierExhausted);
+                }
+                inv.uncommon_minted += 1;
+            }
+            RarityTier::Common => {
+                inv.common_minted += 1;
+            }
+        }
+
+        inv.total_minted += 1;
+        storage::set_collectible_inventory(&env, event_id, &inv);
+
+        let nft_id = storage::get_next_nft_id(&env);
+        storage::increment_nft_id(&env);
+
+        let minted_at = env.ledger().timestamp();
+
+        let nft = NftCollectible {
+            id: nft_id,
+            event_id,
+            name,
+            description,
+            rarity: rarity.clone(),
+            owner: recipient.clone(),
+            minted_at,
+            transferable,
+            metadata_hash,
+        };
+
+        storage::set_nft(&env, nft_id, &nft);
+
+        NftMinted::emit(&env, nft_id, event_id, recipient, rarity, minted_at);
+
+        CollectibleInventoryUpdated::emit(&env, event_id, inv.max_supply, inv.total_minted);
+
+        Ok(nft_id)
+    }
+
+    /// Trade (transfer) an NFT collectible to another address.
+    /// Only the current owner can trade their NFT.
+    /// The NFT must have transferable = true.
+    /// Emits NftTraded event.
+    pub fn trade_nft(
+        env: Env,
+        from: Address,
+        to: Address,
+        nft_id: u64,
+    ) -> Result<(), LumentixError> {
+        from.require_auth();
+
+        let mut nft = storage::get_nft(&env, nft_id)?;
+
+        if nft.owner != from {
+            return Err(LumentixError::NftNotOwned);
+        }
+
+        if !nft.transferable {
+            return Err(LumentixError::NftNotTransferable);
+        }
+
+        let event_id = nft.event_id;
+        nft.owner = to.clone();
+        storage::set_nft(&env, nft_id, &nft);
+
+        NftTraded::emit(&env, nft_id, event_id, from, to);
+
+        Ok(())
+    }
+
+    /// Get an NFT collectible by ID.
+    pub fn get_nft(env: Env, nft_id: u64) -> Result<NftCollectible, LumentixError> {
+        storage::get_nft(&env, nft_id)
+    }
+
+    /// Configure or update the collectible inventory for an event.
+    /// Only the event organizer can call this.
+    /// Sets the maximum supply of NFT collectibles for the event.
+    /// Can be called before minting begins to initialise, or to increase max_supply.
+    /// Emits CollectibleInventoryUpdated event.
+    pub fn manage_collectible_inventory(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        max_supply: u32,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        validation::validate_positive_capacity(max_supply)?;
+
+        if storage::has_collectible_inventory(&env, event_id) {
+            // Update existing inventory — max_supply cannot be reduced below total_minted
+            let mut inv = storage::get_collectible_inventory(&env, event_id)?;
+            if max_supply < inv.total_minted {
+                return Err(LumentixError::CapacityExceeded);
+            }
+            inv.max_supply = max_supply;
+            storage::set_collectible_inventory(&env, event_id, &inv);
+            CollectibleInventoryUpdated::emit(&env, event_id, max_supply, inv.total_minted);
+        } else {
+            // Create new inventory
+            let inv = CollectibleInventory {
+                event_id,
+                total_minted: 0,
+                max_supply,
+                common_minted: 0,
+                uncommon_minted: 0,
+                rare_minted: 0,
+                epic_minted: 0,
+                legendary_minted: 0,
+            };
+            storage::set_collectible_inventory(&env, event_id, &inv);
+            CollectibleInventoryUpdated::emit(&env, event_id, max_supply, 0);
+        }
+
+        Ok(())
+    }
+
+    /// Get the collectible inventory for an event.
+    pub fn get_collectible_inventory(
+        env: Env,
+        event_id: u64,
+    ) -> Result<CollectibleInventory, LumentixError> {
+        storage::get_collectible_inventory(&env, event_id)
     }
 }

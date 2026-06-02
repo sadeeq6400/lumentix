@@ -1,11 +1,11 @@
 use crate::error::LumentixError;
 use crate::types::{
     AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CarbonFootprint,
-    CarbonOffsetPurchase, CrossChainTransfer, CurrencyConfig, EnvironmentalImpact, Event,
-    EventReview, IdentityCredential, IdentityProvider, InsurancePolicy, InsurancePool,
-    OrganizerReputation, Seat, Ticket, TicketTransferRecord, UpgradeGovernanceConfig,
-    UpgradeProposal, UpgradeVote, VenueLayout, VipTier, WaitlistOffer, INSTANCE_LIFETIME,
-    PERSISTENT_LIFETIME,
+    CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer, CurrencyConfig,
+    EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
+    IdentityProvider, InsurancePolicy, InsurancePool, NftCollectible, OrganizerReputation, Seat,
+    Ticket, TicketTransferRecord, UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
+    VenueLayout, VipTier, WaitlistOffer, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -1231,4 +1231,141 @@ pub fn register_supported_chain(env: &Env, chain: &String, supported: bool) {
 pub fn is_chain_supported(env: &Env, chain: &String) -> bool {
     let key = (SUPPORTED_CHAIN_PREFIX, chain.clone());
     env.storage().instance().get(&key).unwrap_or(false)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MERCHANDISE & NFT COLLECTIBLE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const MERCHANDISE_PREFIX: &str = "MERCH_";
+const MERCHANDISE_COUNTER: &str = "MERCH_CTR";
+const NFT_PREFIX: &str = "NFT_";
+const NFT_COUNTER: &str = "NFT_CTR";
+const COLLECTIBLE_INVENTORY_PREFIX: &str = "COLINV_";
+
+/// Get next merchandise ID
+pub fn get_next_merchandise_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&MERCHANDISE_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment merchandise ID counter
+pub fn increment_merchandise_id(env: &Env) {
+    let next_id = get_next_merchandise_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&MERCHANDISE_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Set merchandise item
+pub fn set_merchandise(env: &Env, merchandise_id: u64, item: &EventMerchandise) {
+    let key = (MERCHANDISE_PREFIX, merchandise_id);
+    env.storage().persistent().set(&key, item);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get merchandise item
+pub fn get_merchandise(
+    env: &Env,
+    merchandise_id: u64,
+) -> Result<EventMerchandise, LumentixError> {
+    let key = (MERCHANDISE_PREFIX, merchandise_id);
+    let item = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::MerchandiseNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(item)
+}
+
+/// Get next NFT ID
+pub fn get_next_nft_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&NFT_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment NFT ID counter
+pub fn increment_nft_id(env: &Env) {
+    let next_id = get_next_nft_id(env) + 1;
+    env.storage().instance().set(&NFT_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Set NFT collectible
+pub fn set_nft(env: &Env, nft_id: u64, nft: &NftCollectible) {
+    let key = (NFT_PREFIX, nft_id);
+    env.storage().persistent().set(&key, nft);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get NFT collectible
+pub fn get_nft(env: &Env, nft_id: u64) -> Result<NftCollectible, LumentixError> {
+    let key = (NFT_PREFIX, nft_id);
+    let nft = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::NftNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(nft)
+}
+
+/// Set collectible inventory for an event
+pub fn set_collectible_inventory(env: &Env, event_id: u64, inv: &CollectibleInventory) {
+    let key = (COLLECTIBLE_INVENTORY_PREFIX, event_id);
+    env.storage().persistent().set(&key, inv);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get collectible inventory for an event
+pub fn get_collectible_inventory(
+    env: &Env,
+    event_id: u64,
+) -> Result<CollectibleInventory, LumentixError> {
+    let key = (COLLECTIBLE_INVENTORY_PREFIX, event_id);
+    let inv = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::CollectibleInventoryNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(inv)
+}
+
+/// Check if collectible inventory exists for an event
+pub fn has_collectible_inventory(env: &Env, event_id: u64) -> bool {
+    let key = (COLLECTIBLE_INVENTORY_PREFIX, event_id);
+    env.storage().persistent().has(&key)
 }

@@ -219,4 +219,26 @@ pub enum LumentixError {
     CrossChainTransferExpired = 88,
     /// Bridge is currently paused
     BridgePaused = 89,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Merchandise & NFT Collectible errors (90–99)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Merchandise item not found
+    MerchandiseNotFound = 90,
+    /// Merchandise item is sold out
+    MerchandiseSoldOut = 91,
+    /// Merchandise item is not active
+    MerchandiseNotActive = 92,
+    /// NFT collectible not found
+    NftNotFound = 93,
+    /// NFT collectible is not transferable
+    NftNotTransferable = 94,
+    /// Collectible inventory not configured for event
+    CollectibleInventoryNotFound = 95,
+    /// Collectible max supply reached
+    CollectibleMaxSupplyReached = 96,
+    /// Rarity tier supply exhausted
+    RarityTierExhausted = 97,
+    /// Caller is not the NFT owner
+    NftNotOwned = 98,
 }

@@ -418,3 +418,62 @@ pub struct BridgeTransaction {
     pub validation_time: u64,
     pub block_number: u64,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Merchandise & NFT Collectibles
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Rarity tier for NFT collectibles
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RarityTier {
+    Common,
+    Uncommon,
+    Rare,
+    Epic,
+    Legendary,
+}
+
+/// Event merchandise item
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventMerchandise {
+    pub id: u64,
+    pub event_id: u64,
+    pub name: String,
+    pub description: String,
+    pub price: i128,
+    pub total_supply: u32,
+    pub remaining_supply: u32,
+    pub organizer: Address,
+    pub active: bool,
+}
+
+/// A commemorative NFT collectible for a special event
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NftCollectible {
+    pub id: u64,
+    pub event_id: u64,
+    pub name: String,
+    pub description: String,
+    pub rarity: RarityTier,
+    pub owner: Address,
+    pub minted_at: u64,
+    pub transferable: bool,
+    pub metadata_hash: BytesN<32>,
+}
+
+/// Collectible inventory tracking per event
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollectibleInventory {
+    pub event_id: u64,
+    pub total_minted: u32,
+    pub max_supply: u32,
+    pub common_minted: u32,
+    pub uncommon_minted: u32,
+    pub rare_minted: u32,
+    pub epic_minted: u32,
+    pub legendary_minted: u32,
+}
