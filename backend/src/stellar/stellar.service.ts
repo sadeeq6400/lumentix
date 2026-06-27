@@ -380,6 +380,24 @@ export class StellarService implements OnModuleDestroy {
     return tx.toXDR();
   }
 
+  verifySignature(
+    publicKey: string,
+    signature: string,
+    message: string,
+  ): boolean {
+    try {
+      const keypair = Keypair.fromPublicKey(publicKey);
+      const messageBuffer = Buffer.from(message, 'utf8');
+      const signatureBuffer = Buffer.from(signature, 'base64');
+      return keypair.verify(messageBuffer, signatureBuffer);
+    } catch (err) {
+      this.logger.warn(
+        `Signature verification failed: ${(err as Error).message}`,
+      );
+      return false;
+    }
+  }
+
   /**
    * Merge an escrow account into a destination account.
    * Sends all remaining XLM balance to `destinationPublicKey` and permanently
