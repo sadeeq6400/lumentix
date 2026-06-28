@@ -26,7 +26,7 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { WalletChallengeResponseDto } from './dto/wallet-challenge.dto';
-import { WalletVerifyDto } from './dto/wallet-challenge.dto';
+import { WalletVerifyDto } from './dto/wallet-verify.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
@@ -140,6 +140,16 @@ export class AuthController {
   }
 
   // ─── Google OAuth ────────────────────────────────────────────────────────
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Generate wallet challenge nonce' })
+  @ApiResponse({ status: 201, description: 'Nonce generated' })
+  async walletChallenge(
+    @Req() req: AuthenticatedRequest,
+  ): Promise<WalletChallengeResponseDto> {
+    const result = await this.authService.generateWalletChallenge(req.user.id);
+    return { nonce: result.nonce, message: result.message };
+  }
 
   @Get('google')
   @UseGuards(GoogleAuthGuard)
